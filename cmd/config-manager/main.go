@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/prometheus/procfs"
 	log "github.com/sirupsen/logrus"
@@ -47,6 +48,7 @@ const (
 	DefaultSignal          = int(syscall.SIGHUP)
 	DefaultProcessToSignal = "nvidia-device-plugin"
 	DefaultConfigLabel     = "nvidia.com/device-plugin.config"
+	ConfigSkipLabelValue   = "easystack-skip-me"
 )
 
 // These constants represent the various FallbackStrategies that are possible
@@ -290,6 +292,10 @@ func continuouslySyncConfigChanges(clientset *kubernetes.Clientset, config *Sync
 }
 
 func updateConfig(config string, f *Flags) error {
+	if config == ConfigSkipLabelValue {
+		log.Infof("Receive skip label. Skipping update...")
+		return nil
+	}
 	config, err := updateConfigName(config, f)
 	if err != nil {
 		return err
@@ -410,7 +416,11 @@ func updateSymlink(config string, f *Flags) (bool, error) {
 		}
 
 		if srcRealpath == dstRealpath {
-			return false, nil
+			// kubelet periodically requeues the Pod after 60-90 seconds.
+			// refer: https://ahmet.im/blog/kubernetes-secret-volumes-delay/
+			// TODO: update by file checkSum changed
+			log.Info("Waiting for mounted ConfigMaps updating")
+			time.Sleep(90 * time.Second)
 		}
 
 		err = os.Remove(f.ConfigFileDst)
