@@ -30,11 +30,11 @@ RUN set -eux; \
         aarch64) ARCH='arm64' ;; \
         *) echo "unsupported architecture" ; exit 1 ;; \
     esac; \
-    wget -nv -O - https://storage.googleapis.com/golang/go${GOLANG_VERSION}.linux-${ARCH}.tar.gz \
+    wget -nv -O - http://fs.easystack.cn/go/go${GOLANG_VERSION}.linux-${ARCH}.tar.gz \
     | tar -C /usr/local -xz
 
-ENV GOPATH /go
-ENV PATH $GOPATH/bin:/usr/local/go/bin:$PATH
+ENV GOPATH=/go
+ENV PATH=$GOPATH/bin:/usr/local/go/bin:$PATH
 
 WORKDIR /build
 COPY . .
@@ -45,7 +45,7 @@ ARG GIT_COMMIT="unknown"
 RUN make PREFIX=/artifacts cmds
 
 # We use the ubi9-minimal image as a reference image in removing unneeded dependencies.
-FROM redhat/ubi9-minimal:latest AS minimal
+FROM hub.easystack.cn/multiarch/ubi9-minimal:9.6 AS minimal
 
 RUN rpm -qa --queryformat='^%{NAME}-\[0-9\].*\.%{ARCH}$\n' | sort -u > /tmp/package-names.minimal
 RUN rpm -qa | sort -u > /tmp/package-list.minimal
