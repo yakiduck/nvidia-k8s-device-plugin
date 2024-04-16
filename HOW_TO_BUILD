@@ -1,0 +1,1 @@
+REGISTRY=${registry} IMAGE_TAG=v0.14.5-es VERSION=v0.14.5-es make build-ubi8 -f deployments/container/Makefile

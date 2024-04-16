@@ -23,7 +23,9 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/prometheus/procfs"
 	cli "github.com/urfave/cli/v2"
 
@@ -328,27 +330,76 @@ func updateConfig(config string, f *Flags) error {
 }
 
 func updateConfigName(config string, f *Flags) (string, error) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return "", fmt.Errorf("new watcher error: %v", err)
+	}
+	defer watcher.Close()
+
+	err = watcher.Add(f.ConfigFileSrcdir)
+	if err != nil {
+		return "", fmt.Errorf("watch file error: %v", err)
+	}
+
 	// Get a lists of the available config file names
 	files, err := getConfigFileNameMap(f)
 	if err != nil {
 		return "", fmt.Errorf("error getting list of configuration files: %v", err)
 	}
 
-	if len(files) == 0 {
-		return "", fmt.Errorf("no configuration files available")
+	// If an explicit config was passed in, check to see if it is available.
+	if config != "" {
+		if !files[config] {
+			var watchErr error
+			done := make(chan bool)
+
+			klog.Infof("Specified config %v not found, start watching", config)
+			go func() {
+				// kubelet periodically requeues the Pod after 60-90 seconds.
+				// Set timeout for 90 seconds.
+				// refer: https://ahmet.im/blog/kubernetes-secret-volumes-delay/
+				timeout := time.After(90 * time.Second)
+				for {
+					select {
+					case event := <-watcher.Events:
+						//klog.Infof("%s has been %s", event.Name, event.Op)
+						if event.Op&fsnotify.Create == fsnotify.Create && filepath.Base(event.Name) == "..data" {
+							files, err = getConfigFileNameMap(f)
+							if err != nil {
+								klog.Errorf("Error getting list of configuration files: %v", err)
+								continue
+							}
+							if files[config] {
+								klog.Infof("Configuration file is updated")
+								done <- true
+								return
+							}
+							klog.Errorf("the requested config %s is not present", config)
+						}
+					case err = <-watcher.Errors:
+						klog.Errorf("Watch error: %v", err)
+					case <-timeout:
+						klog.Warningf("Timeout reached. Exiting...")
+						watchErr = fmt.Errorf("watching file timeout")
+						done <- true
+						return
+					}
+				}
+			}()
+			<-done
+			if len(files) == 0 {
+				return "", fmt.Errorf("no configuration files available")
+			}
+			if watchErr != nil {
+				return "", fmt.Errorf("specified config %v does not exist: %v", config, watchErr)
+			}
+		}
+		return config, nil
 	}
 
 	filenames := make([]string, 0, len(files))
 	for f := range files {
 		filenames = append(filenames, f)
-	}
-
-	// If an explicit config was passed in, check to see if it is available.
-	if config != "" {
-		if !files[config] {
-			return "", fmt.Errorf("specified config %v does not exist", config)
-		}
-		return config, nil
 	}
 
 	// Otherwise, if an explicit default is set, check to see if it is available.
@@ -403,7 +454,7 @@ func updateSymlink(config string, f *Flags) (bool, error) {
 			return false, fmt.Errorf("error evaluating realpath of '%v': %v", src, err)
 		}
 
-		dstRealpath, err := filepath.EvalSymlinks(f.ConfigFileDst)
+		dstRealpath, err := os.Readlink(f.ConfigFileDst)
 		if err != nil {
 			return false, fmt.Errorf("error evaluating realpath of '%v': %v", f.ConfigFileDst, err)
 		}
@@ -456,7 +507,7 @@ func findPidToSignal(f *Flags) (int, error) {
 }
 
 func fileExists(filename string) (bool, error) {
-	info, err := os.Stat(filename)
+	info, err := os.Lstat(filename)
 	if os.IsNotExist(err) {
 		return false, nil
 	}
