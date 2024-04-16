@@ -30,11 +30,11 @@ RUN set -eux; \
         aarch64) ARCH='arm64' ;; \
         *) echo "unsupported architecture" ; exit 1 ;; \
     esac; \
-    wget -nv -O - https://storage.googleapis.com/golang/go${GOLANG_VERSION}.linux-${ARCH}.tar.gz \
+    wget -nv -O - http://fs.easystack.cn/go/go${GOLANG_VERSION}.linux-${ARCH}.tar.gz \
     | tar -C /usr/local -xz
 
-ENV GOPATH /go
-ENV PATH $GOPATH/bin:/usr/local/go/bin:$PATH
+ENV GOPATH=/go
+ENV PATH=$GOPATH/bin:/usr/local/go/bin:$PATH
 
 WORKDIR /build
 COPY . .
